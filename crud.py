@@ -1,12 +1,8 @@
-# crud.py
 from sqlalchemy.orm import Session, joinedload
-from sqlalchemy import or_, and_
+from sqlalchemy import or_, and_, not_
 import sql_models
 
 def get_user(db: Session, user_id: str):
-    """
-    Obtiene un único usuario por su ID, cargando sus relaciones.
-    """
     return db.query(sql_models.User).options(
         joinedload(sql_models.User.achievements),
         joinedload(sql_models.User.marketplace_listings)
@@ -14,86 +10,58 @@ def get_user(db: Session, user_id: str):
 
 def get_discovery_profiles(db: Session, user_id: str):
     """
-    Obtiene perfiles para el "discovery feed".
-    Excluye:
-    - El propio usuario.
-    - Usuarios a los que el usuario actual ya ha dado like.
-    - Usuarios con los que el usuario actual ya tiene una conexión.
+    Obtiene perfiles con los que el usuario actual no ha interactuado.
     """
-    liked_user_ids = db.query(sql_models.Like.liked_id).filter(sql_models.Like.liker_id == user_id).subquery()
-    
-    connected_user_ids_1 = db.query(sql_models.Connection.user2_id).filter(sql_models.Connection.user1_id == user_id).subquery()
-    connected_user_ids_2 = db.query(sql_models.Connection.user1_id).filter(sql_models.Connection.user2_id == user_id).subquery()
+    # IDs de usuarios con los que el usuario actual ya ha interactuado
+    interacted_user_ids = db.query(sql_models.Connection.user_liked_id).filter(sql_models.Connection.user_liking_id == user_id)
 
     return db.query(sql_models.User).filter(
         sql_models.User.id != user_id,
-        sql_models.User.id.notin_(liked_user_ids),
-        sql_models.User.id.notin_(connected_user_ids_1),
-        sql_models.User.id.notin_(connected_user_ids_2)
+        not_(sql_models.User.id.in_(interacted_user_ids))
     ).all()
 
 def get_connections_for_user(db: Session, user_id: str):
     """
-    Obtiene todos los perfiles con los que un usuario tiene una conexión.
+    Obtiene todos los perfiles con los que un usuario tiene un 'match'.
     """
-    connected_user_ids = db.query(sql_models.Connection.user1_id, sql_models.Connection.user2_id).filter(
-        or_(sql_models.Connection.user1_id == user_id, sql_models.Connection.user2_id == user_id)
+    # Encuentra conexiones donde el estado es 'matched'
+    matched_connections = db.query(sql_models.Connection).filter(
+        and_(
+            or_(sql_models.Connection.user_liking_id == user_id, sql_models.Connection.user_liked_id == user_id),
+            sql_models.Connection.status == 'matched'
+        )
     ).all()
     
-    # Flatten the list of tuples and remove the current user's ID
-    all_ids = {uid for pair in connected_user_ids for uid in pair if uid != user_id}
+    # Extrae los IDs de los otros usuarios en esas conexiones
+    all_ids = {c.user_liking_id if c.user_liked_id == user_id else c.user_liked_id for c in matched_connections}
 
     if not all_ids:
         return []
 
-    return db.query(sql_models.User).options(
-        joinedload(sql_models.User.achievements),
-        joinedload(sql_models.User.marketplace_listings)
-    ).filter(sql_models.User.id.in_(all_ids)).all()
+    return db.query(sql_models.User).filter(sql_models.User.id.in_(all_ids)).all()
 
-def create_like(db: Session, liker_id: str, liked_id: str):
+def create_or_update_connection(db: Session, liker_id: str, liked_id: str):
     """
-    Crea un registro de 'like' en la base de datos.
+    Registra un 'like' y comprueba si resulta en un 'match'.
     """
-    # Evita likes duplicados
-    existing_like = db.query(sql_models.Like).filter(
-        sql_models.Like.liker_id == liker_id,
-        sql_models.Like.liked_id == liked_id
+    # El usuario da like: crea o actualiza la acción con 'liked'
+    my_like = sql_models.Connection(user_liking_id=liker_id, user_liked_id=liked_id, status='liked')
+    db.merge(my_like)
+
+    # Comprueba si el otro usuario ya había dado like
+    other_like = db.query(sql_models.Connection).filter(
+        sql_models.Connection.user_liking_id == liked_id,
+        sql_models.Connection.user_liked_id == liker_id
     ).first()
-    if existing_like:
-        return existing_like
 
-    db_like = sql_models.Like(liker_id=liker_id, liked_id=liked_id)
-    db.add(db_like)
+    if other_like:
+        # ¡Es un match! Actualiza ambas filas a 'matched'
+        other_like.status = 'matched'
+        my_like.status = 'matched' # Actualiza el objeto que estamos a punto de hacer merge
+        db.merge(other_like)
+        db.merge(my_like)
+        db.commit()
+        return True # Indica que es un match
+    
     db.commit()
-    db.refresh(db_like)
-    return db_like
-
-def check_for_match(db: Session, user1_id: str, user2_id: str):
-    """
-    Verifica si existe un like mutuo (si user2_id ya ha dado like a user1_id).
-    """
-    return db.query(sql_models.Like).filter(
-        sql_models.Like.liker_id == user2_id,
-        sql_models.Like.liked_id == user1_id
-    ).first()
-
-def create_connection(db: Session, user1_id: str, user2_id: str):
-    """
-    Crea un registro de 'connection' si no existe ya.
-    """
-    # Evita conexiones duplicadas
-    existing_connection = db.query(sql_models.Connection).filter(
-        or_(
-            and_(sql_models.Connection.user1_id == user1_id, sql_models.Connection.user2_id == user2_id),
-            and_(sql_models.Connection.user1_id == user2_id, sql_models.Connection.user2_id == user1_id)
-        )
-    ).first()
-    if existing_connection:
-        return existing_connection
-
-    db_connection = sql_models.Connection(user1_id=user1_id, user2_id=user2_id)
-    db.add(db_connection)
-    db.commit()
-    db.refresh(db_connection)
-    return db_connection
+    return False # No es un match (todavía)

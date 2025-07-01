@@ -1,0 +1,113 @@
+CREATE TYPE achievement_category AS ENUM ('académico', 'vida', 'deportivo');
+CREATE TYPE marketplace_listing_type AS ENUM ('buscoTrabajo', 'vendoAlgo', 'ofrezcoTrabajo', 'otro');
+CREATE TYPE user_responsiveness AS ENUM ('high', 'medium', 'low');
+CREATE TYPE connection_status AS ENUM ('liked', 'matched', 'passed', 'blocked');
+
+CREATE TABLE users (
+    id TEXT PRIMARY KEY, 
+    name TEXT NOT NULL,
+    age INT NOT NULL CHECK (age >= 18),
+    bio TEXT,
+    photos TEXT[], 
+    primary_photo_url TEXT,
+    interests TEXT[],
+    occupation TEXT,
+    looking_for TEXT,
+    country TEXT,
+    latitude DECIMAL(9, 6),
+    longitude DECIMAL(9, 6),
+    gender_identities TEXT[],
+    seeking_gender_identities TEXT[],
+    responsiveness_level user_responsiveness DEFAULT 'medium',
+    gift_balance INT DEFAULT 0,
+    interaction_score INT DEFAULT 0,
+    is_premium BOOLEAN DEFAULT FALSE,
+    last_interaction_date TIMESTAMPTZ,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+
+CREATE INDEX idx_users_country ON users(country);
+CREATE INDEX idx_users_is_premium ON users(is_premium);
+
+CREATE TABLE achievements (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    category achievement_category NOT NULL,
+    description TEXT NOT NULL,
+    photo TEXT,
+    date_added TIMESTAMPTZ DEFAULT NOW(),
+    is_boosted BOOLEAN DEFAULT FALSE,
+    boost_expiry_date TIMESTAMPTZ
+);
+
+
+
+CREATE INDEX idx_achievements_user_id ON achievements(user_id);
+
+
+CREATE TABLE marketplace_listings (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    type marketplace_listing_type NOT NULL,
+    title TEXT NOT NULL,
+    description TEXT NOT NULL,
+    photo TEXT,
+    price DECIMAL(10, 2),
+    is_paid_ad BOOLEAN DEFAULT FALSE,
+    date_added TIMESTAMPTZ DEFAULT NOW(),
+    expiry_date TIMESTAMPTZ,
+    was_successful_via_vibrai BOOLEAN
+);
+
+
+CREATE INDEX idx_marketplace_listings_user_id ON marketplace_listings(user_id);
+-- Índice para encontrar anuncios activos.
+CREATE INDEX idx_marketplace_listings_active ON marketplace_listings(expiry_date) WHERE is_paid_ad = TRUE;
+
+CREATE TABLE connections (
+    user_liking_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    user_liked_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    status connection_status NOT NULL DEFAULT 'liked',
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    PRIMARY KEY (user_liking_id, user_liked_id)
+);
+
+
+
+CREATE INDEX idx_connections_user_liked_id ON connections(user_liked_id);
+
+CREATE TABLE chats (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    participant_ids TEXT[] NOT NULL,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+
+CREATE INDEX idx_chats_participant_ids ON chats USING GIN(participant_ids);
+
+CREATE TABLE messages (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    chat_id UUID NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
+    sender_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    text TEXT, 
+    gift_id TEXT, 
+    "timestamp" TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX idx_messages_chat_id_timestamp ON messages(chat_id, "timestamp" DESC);
+
+CREATE TABLE received_gifts (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    receiver_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    sender_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    gift_id TEXT NOT NULL, 
+    gift_name TEXT NOT NULL,
+    date_received TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX idx_received_gifts_receiver_id ON received_gifts(receiver_id);
+
+
+

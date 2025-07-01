@@ -5,14 +5,22 @@ from sqlalchemy import (
     Boolean,
     Text,
     DateTime,
-    Float,
     ForeignKey,
-    ARRAY,
-    DECIMAL
+    DECIMAL,
+    Enum,
+    PrimaryKeyConstraint,
+    ARRAY
 )
 from sqlalchemy.orm import relationship
 from database import Base
 import datetime
+
+# Definición de los ENUM types para que SQLAlchemy los conozca
+achievement_category_enum = Enum('académico', 'vida', 'deportivo', name='achievement_category')
+marketplace_listing_type_enum = Enum('buscoTrabajo', 'vendoAlgo', 'ofrezcoTrabajo', 'otro', name='marketplace_listing_type')
+user_responsiveness_enum = Enum('high', 'medium', 'low', name='user_responsiveness')
+connection_status_enum = Enum('liked', 'matched', 'passed', 'blocked', name='connection_status')
+
 
 class User(Base):
     __tablename__ = "users"
@@ -30,24 +38,22 @@ class User(Base):
     longitude = Column(DECIMAL(9, 6))
     gender_identities = Column(ARRAY(String))
     seeking_gender_identities = Column(ARRAY(String))
-    responsiveness_level = Column(String, default='medium')
+    responsiveness_level = Column(user_responsiveness_enum, default='medium')
     gift_balance = Column(Integer, default=0)
     interaction_score = Column(Integer, default=0)
     is_premium = Column(Boolean, default=False)
     last_interaction_date = Column(DateTime(timezone=True))
     created_at = Column(DateTime(timezone=True), default=datetime.datetime.utcnow)
+    updated_at = Column(DateTime(timezone=True), default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
     
     achievements = relationship("Achievement", back_populates="owner")
     marketplace_listings = relationship("MarketplaceListing", back_populates="owner")
-    likes_given = relationship("Like", foreign_keys="[Like.liker_id]", back_populates="liker")
-    likes_received = relationship("Like", foreign_keys="[Like.liked_id]", back_populates="liked")
-
 
 class Achievement(Base):
     __tablename__ = "achievements"
     id = Column(String, primary_key=True, index=True)
     user_id = Column(String, ForeignKey("users.id"))
-    category = Column(String, nullable=False)
+    category = Column(achievement_category_enum, nullable=False)
     description = Column(Text, nullable=False)
     photo = Column(String)
     date_added = Column(DateTime(timezone=True), default=datetime.datetime.utcnow)
@@ -60,7 +66,7 @@ class MarketplaceListing(Base):
     __tablename__ = "marketplace_listings"
     id = Column(String, primary_key=True, index=True)
     user_id = Column(String, ForeignKey("users.id"))
-    type = Column(String, nullable=False)
+    type = Column(marketplace_listing_type_enum, nullable=False)
     title = Column(String, nullable=False)
     description = Column(Text, nullable=False)
     photo = Column(String)
@@ -72,19 +78,11 @@ class MarketplaceListing(Base):
 
     owner = relationship("User", back_populates="marketplace_listings")
 
-class Like(Base):
-    __tablename__ = "likes"
-    id = Column(Integer, primary_key=True, index=True)
-    liker_id = Column(String, ForeignKey("users.id"), nullable=False)
-    liked_id = Column(String, ForeignKey("users.id"), nullable=False)
-    created_at = Column(DateTime(timezone=True), default=datetime.datetime.utcnow)
-
-    liker = relationship("User", foreign_keys=[liker_id], back_populates="likes_given")
-    liked = relationship("User", foreign_keys=[liked_id], back_populates="likes_received")
-
 class Connection(Base):
-    __tablename__ = "connections"
-    id = Column(Integer, primary_key=True, index=True)
-    user1_id = Column(String, ForeignKey("users.id"), nullable=False)
-    user2_id = Column(String, ForeignKey("users.id"), nullable=False)
+    __tablename__ = 'connections'
+    user_liking_id = Column(String, ForeignKey('users.id'), nullable=False)
+    user_liked_id = Column(String, ForeignKey('users.id'), nullable=False)
+    status = Column(connection_status_enum, nullable=False, default='liked')
     created_at = Column(DateTime(timezone=True), default=datetime.datetime.utcnow)
+    
+    __table_args__ = (PrimaryKeyConstraint('user_liking_id', 'user_liked_id'),)
