@@ -4,6 +4,7 @@ from typing import List
 from fastapi import FastAPI, Depends, HTTPException, Path
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
+from sqlalchemy import text
 
 import crud, schemas, sql_models
 from database import SessionLocal, engine
@@ -11,20 +12,30 @@ from database import SessionLocal, engine
 app = FastAPI(
     title="Vibrai Backend",
     description="API para la aplicación de citas Vibrai con integración de IA y base de datos.",
-    version="1.6.0" # Versión Robusta
+    version="1.7.0" # Versión con Reseteo en Cascada
 )
 
 @app.on_event("startup")
 def on_startup():
-    print("Iniciando aplicación. Reconstruyendo y poblando la base de datos...")
+    print("Iniciando aplicación. Forzando reseteo de la base de datos...")
     
-    # --- RESETEA LA BASE DE DATOS EN CADA ARRANQUE ---
-    # Esto es ideal para desarrollo para asegurar un estado limpio.
-    sql_models.Base.metadata.drop_all(bind=engine)
+    # --- RESETEA LA BASE DE DATOS EN CADA ARRANQUE (MÉTODO ROBUSTO) ---
+    # Esto soluciona errores de dependencia al borrar tablas.
+    with engine.connect() as connection:
+        # Usamos una transacción para ejecutar estos comandos DDL.
+        with connection.begin():
+             connection.execute(text("DROP SCHEMA public CASCADE;"))
+             connection.execute(text("CREATE SCHEMA public;"))
+    print("Schema de la base de datos reseteado.")
+
+    # Crear todas las tablas de nuevo en el schema limpio.
     sql_models.Base.metadata.create_all(bind=engine)
+    print("Tablas creadas con éxito.")
     
+    # Poblar la base de datos con datos de prueba.
     db = SessionLocal()
     try:
+        print("Poblando la base de datos con datos de ejemplo...")
         users_data = [
             {
                 "id": "currentUser", "name": "Alex", "age": 28, "bio": "Explorando cafés y senderos.",
@@ -64,7 +75,7 @@ def on_startup():
         print("Base de datos poblada con 5 usuarios de prueba.")
     finally:
         db.close()
-    print("Preparación de la base de datos completa.")
+    print("Preparación de la base de datos completa. La aplicación está lista.")
 
 
 app.add_middleware(
@@ -104,7 +115,6 @@ def like_a_user(liked_user_id: str = Path(...), db: Session = Depends(get_db)):
     liker_id = "currentUser"
     if liker_id == liked_user_id: raise HTTPException(status_code=400, detail="No puedes darte 'me gusta' a ti mismo.")
     
-    # Validación extra para asegurar que el usuario existe antes de intentar dar like
     liked_user = crud.get_user(db, user_id=liked_user_id)
     if not liked_user:
         raise HTTPException(status_code=404, detail=f"El usuario con ID '{liked_user_id}' no fue encontrado.")
