@@ -50,5 +50,4 @@ class User(BaseModel):
 
 class LikeResponse(BaseModel):
     is_match: bool
-    connection_id: Optional[int] = None
     match_profile: Optional[User] = None
