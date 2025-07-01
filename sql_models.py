@@ -39,6 +39,9 @@ class User(Base):
     
     achievements = relationship("Achievement", back_populates="owner")
     marketplace_listings = relationship("MarketplaceListing", back_populates="owner")
+    likes_given = relationship("Like", foreign_keys="[Like.liker_id]", back_populates="liker")
+    likes_received = relationship("Like", foreign_keys="[Like.liked_id]", back_populates="liked")
+
 
 class Achievement(Base):
     __tablename__ = "achievements"
@@ -68,3 +71,20 @@ class MarketplaceListing(Base):
     was_successful_via_vibrai = Column(Boolean)
 
     owner = relationship("User", back_populates="marketplace_listings")
+
+class Like(Base):
+    __tablename__ = "likes"
+    id = Column(Integer, primary_key=True, index=True)
+    liker_id = Column(String, ForeignKey("users.id"), nullable=False)
+    liked_id = Column(String, ForeignKey("users.id"), nullable=False)
+    created_at = Column(DateTime(timezone=True), default=datetime.datetime.utcnow)
+
+    liker = relationship("User", foreign_keys=[liker_id], back_populates="likes_given")
+    liked = relationship("User", foreign_keys=[liked_id], back_populates="likes_received")
+
+class Connection(Base):
+    __tablename__ = "connections"
+    id = Column(Integer, primary_key=True, index=True)
+    user1_id = Column(String, ForeignKey("users.id"), nullable=False)
+    user2_id = Column(String, ForeignKey("users.id"), nullable=False)
+    created_at = Column(DateTime(timezone=True), default=datetime.datetime.utcnow)

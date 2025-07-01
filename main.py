@@ -5,7 +5,7 @@ import json
 import uvicorn
 from typing import List, Any, Optional
 
-from fastapi import FastAPI, HTTPException, Body, Depends
+from fastapi import FastAPI, HTTPException, Body, Depends, Path
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
@@ -17,8 +17,6 @@ import sql_models
 from database import get_db, engine
 
 # --- Creación de Tablas en la Base de Datos ---
-# Esta línea creará las tablas definidas en sql_models.py si no existen.
-# Es seguro ejecutarlo cada vez; no recreará tablas existentes.
 sql_models.Base.metadata.create_all(bind=engine)
 
 # --- Configuración de la API de Gemini ---
@@ -67,7 +65,7 @@ class RewriteMessageRequest(BaseModel):
 app = FastAPI(
     title="Vibrai Backend",
     description="API para la aplicación de citas Vibrai con integración de IA y base de datos.",
-    version="1.2.0"
+    version="1.3.0"
 )
 
 # --- Middleware de CORS ---
@@ -104,17 +102,52 @@ def parse_json_from_gemini(text: str) -> Any:
 def read_root():
     return {"message": "Bienvenido al backend de Vibrai"}
 
+# --- Endpoints de Datos (Conectados a la Base de Datos) ---
+
 @app.get("/api/profile", response_model=schemas.User)
 def get_user_profile(db: Session = Depends(get_db)):
-    user = crud.get_user(db, user_id="currentUser")
+    # Asumimos que el ID del usuario actual es 'currentUser' para este ejemplo.
+    user_id = "currentUser"
+    user = crud.get_user(db, user_id=user_id)
     if user is None:
-        raise HTTPException(status_code=404, detail="Usuario 'currentUser' no encontrado en la base de datos.")
+        raise HTTPException(status_code=404, detail=f"Usuario '{user_id}' no encontrado en la base de datos.")
     return user
 
 @app.get("/api/matches", response_model=List[schemas.User])
-def get_matches(db: Session = Depends(get_db)):
-    matches = crud.get_all_users_except(db, user_id_to_exclude="currentUser")
+def get_discovery_matches(db: Session = Depends(get_db)):
+    user_id = "currentUser"
+    matches = crud.get_discovery_profiles(db, user_id=user_id)
     return matches
+
+@app.get("/api/connections", response_model=List[schemas.User])
+def get_user_connections(db: Session = Depends(get_db)):
+    user_id = "currentUser"
+    connections = crud.get_connections_for_user(db, user_id=user_id)
+    return connections
+
+@app.post("/api/like/{liked_user_id}", response_model=schemas.LikeResponse)
+def like_a_user(liked_user_id: str = Path(...), db: Session = Depends(get_db)):
+    liker_id = "currentUser"
+    
+    # Prevenir que un usuario se dé like a sí mismo
+    if liker_id == liked_user_id:
+        raise HTTPException(status_code=400, detail="No puedes darte 'me gusta' a ti mismo.")
+
+    # Registrar el like
+    crud.create_like(db, liker_id=liker_id, liked_id=liked_user_id)
+
+    # Comprobar si es un match (si el otro usuario ya había dado like)
+    is_match = crud.check_for_match(db, user1_id=liker_id, user2_id=liked_user_id)
+
+    if is_match:
+        # Si es un match, crear la conexión
+        connection = crud.create_connection(db, user1_id=liker_id, user2_id=liked_user_id)
+        # Obtener el perfil del usuario con el que se hizo match para devolverlo
+        match_profile = crud.get_user(db, user_id=liked_user_id)
+        return schemas.LikeResponse(is_match=True, connection_id=connection.id, match_profile=match_profile)
+    else:
+        # Si no es match, simplemente confirmar la acción
+        return schemas.LikeResponse(is_match=False)
 
 # --- Endpoints de Inteligencia Artificial ---
 @app.post("/api/ai/profile-assistant")

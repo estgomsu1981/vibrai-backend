@@ -48,3 +48,8 @@ class User(BaseModel):
     achievements: List[Achievement] = []
     marketplace_listings: List[MarketplaceListing] = []
     model_config = ConfigDict(from_attributes=True)
+
+class LikeResponse(BaseModel):
+    is_match: bool
+    connection_id: Optional[int] = None
+    match_profile: Optional[User] = None
