@@ -2,7 +2,6 @@
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import or_, and_
 import sql_models
-import schemas
 
 def get_user(db: Session, user_id: str):
     """
@@ -47,7 +46,10 @@ def get_connections_for_user(db: Session, user_id: str):
     if not all_ids:
         return []
 
-    return db.query(sql_models.User).filter(sql_models.User.id.in_(all_ids)).all()
+    return db.query(sql_models.User).options(
+        joinedload(sql_models.User.achievements),
+        joinedload(sql_models.User.marketplace_listings)
+    ).filter(sql_models.User.id.in_(all_ids)).all()
 
 def create_like(db: Session, liker_id: str, liked_id: str):
     """
