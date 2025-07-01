@@ -1,0 +1,338 @@
+--- START OF FILE requirements.txt ---
+fastapi
+uvicorn[standard]
+sqlalchemy
+psycopg2-binary
+pydantic-settings
+python-dotenv
+google-generativeai
+--- END OF FILE requirements.txt ---
+--- START OF FILE database.py ---
+import os
+from sqlalchemy import create_engine
+from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.orm import sessionmaker
+from dotenv import load_dotenv
+
+load_dotenv()
+
+# Render/Neon proporciona la URL de la DB en esta variable de entorno
+SQLALCHEMY_DATABASE_URL = os.getenv("DATABASE_URL")
+
+if not SQLALCHEMY_DATABASE_URL:
+    raise ValueError("No DATABASE_URL set for SQLAlchemy")
+
+engine = create_engine(SQLALCHEMY_DATABASE_URL)
+SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+Base = declarative_base()
+
+# Función de dependencia para inyectar la sesión de la base de datos en los endpoints
+def get_db():
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+--- END OF OF FILE database.py ---
+--- START OF FILE sql_models.py ---
+from sqlalchemy import (
+    Column,
+    Integer,
+    String,
+    Boolean,
+    Text,
+    DateTime,
+    Float,
+    ForeignKey,
+    ARRAY,
+    DECIMAL
+)
+from sqlalchemy.orm import relationship
+from .database import Base
+import datetime
+
+class User(Base):
+    __tablename__ = "users"
+    id = Column(String, primary_key=True, index=True)
+    name = Column(String, nullable=False)
+    age = Column(Integer, nullable=False)
+    bio = Column(Text)
+    photos = Column(ARRAY(String))
+    primary_photo_url = Column(String)
+    interests = Column(ARRAY(String))
+    occupation = Column(String)
+    looking_for = Column(String)
+    country = Column(String)
+    latitude = Column(DECIMAL(9, 6))
+    longitude = Column(DECIMAL(9, 6))
+    gender_identities = Column(ARRAY(String))
+    seeking_gender_identities = Column(ARRAY(String))
+    responsiveness_level = Column(String, default='medium')
+    gift_balance = Column(Integer, default=0)
+    interaction_score = Column(Integer, default=0)
+    is_premium = Column(Boolean, default=False)
+    last_interaction_date = Column(DateTime(timezone=True))
+    created_at = Column(DateTime(timezone=True), default=datetime.datetime.utcnow)
+    
+    achievements = relationship("Achievement", back_populates="owner")
+    marketplace_listings = relationship("MarketplaceListing", back_populates="owner")
+
+class Achievement(Base):
+    __tablename__ = "achievements"
+    id = Column(String, primary_key=True, index=True)
+    user_id = Column(String, ForeignKey("users.id"))
+    category = Column(String, nullable=False)
+    description = Column(Text, nullable=False)
+    photo = Column(String)
+    date_added = Column(DateTime(timezone=True), default=datetime.datetime.utcnow)
+    is_boosted = Column(Boolean, default=False)
+    boost_expiry_date = Column(DateTime(timezone=True))
+    
+    owner = relationship("User", back_populates="achievements")
+
+class MarketplaceListing(Base):
+    __tablename__ = "marketplace_listings"
+    id = Column(String, primary_key=True, index=True)
+    user_id = Column(String, ForeignKey("users.id"))
+    type = Column(String, nullable=False)
+    title = Column(String, nullable=False)
+    description = Column(Text, nullable=False)
+    photo = Column(String)
+    price = Column(DECIMAL(10, 2))
+    is_paid_ad = Column(Boolean, default=False)
+    date_added = Column(DateTime(timezone=True), default=datetime.datetime.utcnow)
+    expiry_date = Column(DateTime(timezone=True))
+    was_successful_via_vibrai = Column(Boolean)
+
+    owner = relationship("User", back_populates="marketplace_listings")
+--- END OF FILE sql_models.py ---
+--- START OF FILE models.py ---
+from pydantic import BaseModel, Field
+from typing import List, Optional, Literal
+from datetime import datetime
+
+# Usamos alias para que el JSON (frontend) pueda ser camelCase
+# mientras que nuestro código Python usa snake_case (PEP8)
+class VibraiBaseModel(BaseModel):
+    class Config:
+        populate_by_name = True
+        alias_generator = lambda string: ''.join(word.capitalize() if i > 0 else word for i, word in enumerate(string.split('_')))
+
+AchievementCategory = Literal['académico', 'vida', 'deportivo']
+MarketplaceListingType = Literal['buscoTrabajo', 'vendoAlgo', 'ofrezcoTrabajo', 'otro']
+
+class Achievement(VibraiBaseModel):
+    id: str
+    category: AchievementCategory
+    description: str
+    photo: Optional[str] = None
+    date_added: str = Field(alias='dateAdded')
+    is_boosted: Optional[bool] = Field(False, alias='isBoosted')
+    boost_expiry_date: Optional[str] = Field(None, alias='boostExpiryDate')
+
+class MarketplaceListing(VibraiBaseModel):
+    id: str
+    user_id: str = Field(alias='userId')
+    type: MarketplaceListingType
+    title: str
+    description: str
+    photo: Optional[str] = None
+    price: Optional[float] = None
+    is_paid_ad: bool = Field(alias='isPaidAd')
+    date_added: str = Field(alias='dateAdded')
+    expiry_date: Optional[str] = Field(None, alias='expiryDate')
+
+class UserProfile(VibraiBaseModel):
+    id: str
+    name: str
+    age: int
+    bio: str
+    photos: List[str]
+    primary_photo_url: Optional[str] = Field(None, alias='primaryPhotoUrl')
+    interests: List[str]
+    occupation: Optional[str] = None
+    looking_for: Optional[str] = Field(None, alias='lookingFor')
+    country: Optional[str] = None
+    achievements: List[Achievement]
+    marketplace_listings: List[MarketplaceListing] = Field(alias='marketplaceListings')
+    
+    class Config:
+        orm_mode = True # Para leer desde modelos SQLAlchemy
+
+# Modelos para peticiones y respuestas de la API de IA
+class IcebreakerRequest(VibraiBaseModel):
+    user_name: str = Field(alias='userName')
+    user_interests: Optional[List[str]] = Field([], alias='userInterests')
+    attempt_number: int = Field(1, alias='attemptNumber')
+
+class IcebreakerResponse(VibraiBaseModel):
+    icebreaker: str
+
+class ChatReplyRequest(VibraiBaseModel):
+    last_message_text: str = Field(alias='lastMessageText')
+    own_name: str = Field(alias='ownName')
+    chat_partner_name: str = Field(alias='chatPartnerName')
+    
+class ChatReplyResponse(VibraiBaseModel):
+    replies: List[str]
+--- END OF FILE models.py ---
+--- START OF FILE crud.py ---
+from sqlalchemy.orm import Session
+from . import sql_models, models
+
+def get_user(db: Session, user_id: str):
+    return db.query(sql_models.User).filter(sql_models.User.id == user_id).first()
+
+def get_users(db: Session, skip: int = 0, limit: int = 100):
+    return db.query(sql_models.User).offset(skip).limit(limit).all()
+
+def get_matches_for_user(db: Session, user_id: str, skip: int = 0, limit: int = 20):
+    # Lógica de emparejamiento simplificada.
+    # En una app real, esto sería mucho más complejo (geolocalización, intereses, etc.)
+    current_user = get_user(db, user_id)
+    if not current_user:
+        return []
+
+    return db.query(sql_models.User).filter(
+        sql_models.User.id != user_id,
+        # Filtro de ejemplo: no mostrar usuarios del mismo país para simular busqueda
+        sql_models.User.country != current_user.country
+    ).offset(skip).limit(limit).all()
+--- END OF FILE crud.py ---
+--- START OF FILE services/__init__.py ---
+
+--- END OF FILE services/__init__.py ---
+--- START OF FILE services/gemini_service.py ---
+import os
+import google.generativeai as genai
+from dotenv import load_dotenv
+
+load_dotenv()
+
+API_KEY = os.getenv('API_KEY')
+if not API_KEY:
+    print("Advertencia: La variable de entorno API_KEY no está configurada.")
+else:
+    genai.configure(api_key=API_KEY)
+
+# Modelo de solo texto
+text_model = genai.GenerativeModel('gemini-1.5-flash')
+
+async def suggest_icebreaker(user_name: str, user_interests: list[str] = [], attempt_number: int = 1) -> str:
+    if not API_KEY:
+        return "Lo siento, la función de IA no está disponible."
+
+    prompt = f"""Eres un asistente de citas experto en iniciar conversaciones con un toque DIVERTIDO y COQUETO. Ayuda a generar un rompehielos para {user_name}.
+Los intereses conocidos de {user_name} son: {', '.join(user_interests) if user_interests else 'ninguno'}. Intenta referenciar sutilmente un interés si es posible.
+Genera una sugerencia CORTA (máx 5 palabras). No incluyas saludos. Intento #{attempt_number}.
+Ejemplos: "¿Escapada o travesura?", "¿Cenas o me cocinas?", "¿Problemas o diversión?"
+Genera UN rompehielos. Solo el texto del rompehielos:"""
+
+    try:
+        response = await text_model.generate_content_async(prompt)
+        return response.text.strip()
+    except Exception as e:
+        print(f"Error en Gemini API: {e}")
+        return "Error al generar sugerencia."
+
+async def suggest_chat_replies(last_message_text: str, own_name: str, chat_partner_name: str) -> list[str]:
+    if not API_KEY:
+        return ["La IA no está disponible."]
+
+    prompt = f"""Contexto: {chat_partner_name} dijo, "{last_message_text}".
+Tarea para {own_name}: 2 respuestas muy cortas (máx 4 palabras cada una), que sean DIVERTIDAS y COQUETAS.
+Salida: Solo array JSON de strings.
+Ejemplo de salida para "Estoy aburrido/a": ["¿Te aburro yo?", "Tengo ideas traviesas..."]
+Genera el array JSON:"""
+
+    try:
+        response = await text_model.generate_content_async(
+            prompt,
+            generation_config=genai.types.GenerationConfig(
+                response_mime_type="application/json"
+            )
+        )
+        # La API a menudo envuelve el JSON en ```json ... ```, hay que limpiarlo
+        json_text = response.text.strip().replace('```json', '').replace('```', '').strip()
+        import json
+        return json.loads(json_text)
+    except Exception as e:
+        print(f"Error en Gemini API para respuestas: {e}")
+        return ["Error al generar respuestas."]
+--- END OF FILE services/gemini_service.py ---
+--- START OF FILE main.py ---
+from fastapi import FastAPI, Depends, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy.orm import Session
+from typing import List
+
+from . import crud, models, sql_models
+from .database import SessionLocal, engine, get_db
+from .services import gemini_service
+
+# Crea las tablas en la base de datos (si no existen)
+sql_models.Base.metadata.create_all(bind=engine)
+
+app = FastAPI(
+    title="Vibrai Backend",
+    description="API para la aplicación de citas Vibrai, conectada a Neon y usando Gemini AI.",
+    version="1.0.0",
+)
+
+# Configuración de CORS para permitir peticiones desde el frontend
+origins = [
+    "http://localhost",
+    "http://localhost:8080",
+    "http://localhost:5173",
+    # Añade aquí la URL de tu frontend cuando lo despliegues
+]
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+@app.get("/")
+def read_root():
+    return {"message": "Bienvenido a la API de Vibrai"}
+
+@app.get("/api/profile/{user_id}", response_model=models.UserProfile)
+def read_user_profile(user_id: str, db: Session = Depends(get_db)):
+    db_user = crud.get_user(db, user_id=user_id)
+    if db_user is None:
+        raise HTTPException(status_code=404, detail="Usuario no encontrado")
+    return db_user
+
+@app.get("/api/matches/{user_id}", response_model=List[models.UserProfile])
+def read_matches(user_id: str, db: Session = Depends(get_db)):
+    # Valida que el usuario actual exista
+    current_user = crud.get_user(db, user_id=user_id)
+    if not current_user:
+        raise HTTPException(status_code=404, detail="El usuario actual no existe y no se pueden buscar matches.")
+    
+    matches = crud.get_matches_for_user(db, user_id=user_id, limit=20)
+    return matches
+
+# --- Endpoints de IA ---
+
+@app.post("/api/ai/suggest-icebreaker", response_model=models.IcebreakerResponse)
+async def suggest_icebreaker_endpoint(request: models.IcebreakerRequest):
+    icebreaker_text = await gemini_service.suggest_icebreaker(
+        user_name=request.user_name,
+        user_interests=request.user_interests,
+        attempt_number=request.attempt_number
+    )
+    return models.IcebreakerResponse(icebreaker=icebreaker_text)
+
+@app.post("/api/ai/suggest-chat-replies", response_model=models.ChatReplyResponse)
+async def suggest_chat_replies_endpoint(request: models.ChatReplyRequest, db: Session = Depends(get_db)):
+    replies = await gemini_service.suggest_chat_replies(
+        last_message_text=request.last_message_text,
+        own_name=request.own_name,
+        chat_partner_name=request.chat_partner_name
+    )
+    return models.ChatReplyResponse(replies=replies)
+--- END OF FILE main.py ---
