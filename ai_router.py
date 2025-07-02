@@ -1,121 +1,75 @@
-import os
-import json
-import re
-from fastapi import APIRouter, HTTPException, Body
-from typing import List, Dict, Any
-import google.generativeai as genai
-from google.generativeai.types import HarmCategory, HarmBlockThreshold
+import asyncio
+from fastapi import APIRouter
+from typing import List
 
 import schemas
-from constants import GEMINI_TEXT_MODEL
 
 router = APIRouter(
     prefix="/api/ai",
-    tags=["IA"],
+    tags=["IA (Placeholder)"],
 )
 
-# --- INICIO DE LA CORRECCIÓN IMPORTANTE ---
-# El error 'ImportError: cannot import name 'GoogleGenerativeAI'' se debe a que la 
-# librería de Python ha cambiado. La forma correcta de inicializar es usando
-# genai.configure() y luego creando un modelo con genai.GenerativeModel().
-
-try:
-    # Configura la API key a nivel de módulo
-    genai.configure(api_key=os.environ["API_KEY"])
-except KeyError:
-    raise RuntimeError("La variable de entorno API_KEY no está configurada.")
-except Exception as e:
-    raise RuntimeError(f"Error al configurar el cliente de IA: {e}")
-
-# Crea una instancia del modelo generativo que usaremos en los endpoints
-model = genai.GenerativeModel(GEMINI_TEXT_MODEL)
-# --- FIN DE LA CORRECCIÓN IMPORTANTE ---
-
-
-# Configuración de seguridad para la IA
-SAFETY_SETTINGS = {
-    HarmCategory.HARM_CATEGORY_HARASSMENT: HarmBlockThreshold.BLOCK_NONE,
-    HarmCategory.HARM_CATEGORY_HATE_SPEECH: HarmBlockThreshold.BLOCK_NONE,
-    HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT: HarmBlockThreshold.BLOCK_NONE,
-    HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT: HarmBlockThreshold.BLOCK_NONE,
-}
-
-def parse_json_from_response(text: str) -> list | dict:
-    """Extrae un bloque de código JSON de una respuesta de texto de la IA."""
-    text = text.strip()
-    match = re.search(r"```(json)?\s*(.*?)\s*```", text, re.DOTALL)
-    json_str = match.group(2) if match else text
-    try:
-        return json.loads(json_str)
-    except json.JSONDecodeError as e:
-        print(f"Error al decodificar JSON: {e}")
-        print(f"String problemático: {json_str}")
-        raise ValueError("La respuesta de la IA no contenía un JSON válido.")
+# --- NOTA: Funcionalidad de IA reemplazada por placeholders ---
+# Las siguientes funciones simulan las respuestas de la IA para
+# permitir el desarrollo del frontend sin una API key de IA activa.
 
 @router.post("/profile-assistant", response_model=schemas.ProfileAssistantResponse)
 async def profile_assistant(req: schemas.ProfileAssistantRequest):
-    system_instruction = "Eres Vibrai Assist, un coach de citas experto. Tu objetivo es ayudar al usuario a crear un perfil atractivo haciéndole 5 preguntas concisas, una por una. Al final, escribe una biografía de 2-3 frases basada en TODAS las respuestas. Responde SIEMPRE en formato JSON: {\"responseText\": \"tu respuesta conversacional\", \"generatedBio\": \"biografía final (o null)\", \"isProfileComplete\": boolean}"
-    
-    # El historial ya viene en el formato correcto desde el frontend
-    contents = req.chat_history
-    contents.append({"role": "user", "parts": [{"text": req.user_message}]})
-    
-    chat = model.start_chat(history=contents[:-1]) # Inicia el chat con el historial previo
-    chat.system_instruction = system_instruction
+    """
+    Simula la conversación con el asistente de perfil.
+    Responde a preguntas y genera una biografía de ejemplo al final.
+    """
+    await asyncio.sleep(0.5) # Simula la latencia de la red
+    num_user_messages = len([msg for msg in req.chat_history if msg.get('role') == 'user'])
 
-    try:
-        response = await chat.send_message_async(
-            req.user_message,
-            safety_settings=SAFETY_SETTINGS
-        )
-        # La API de Gemini ahora puede devolver JSON directamente si se le indica
-        # en el prompt, pero por seguridad lo parseamos.
-        response_data = parse_json_from_response(response.text)
-        return response_data
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error en el asistente de perfil: {e}")
+    questions = [
+        "¡Hola! Soy Vibrai Assist (simulado). Te haré 5 preguntas para crear un buen perfil. Primero, ¿qué te encanta hacer en tu tiempo libre?",
+        "¡Genial! Segunda pregunta: ¿Cuál es tu mayor pasión o algo que te ilumina los ojos al hablar de ello?",
+        "Interesante. Tercera pregunta: ¿Cómo te describirían tus amigos en tres palabras?",
+        "Ya casi terminamos. Cuarta pregunta: ¿Qué buscas en una conexión con alguien (amistad, algo serio, etc.)?",
+        "Última pregunta: Si tuvieras un superpoder, ¿cuál sería y por qué?"
+    ]
+
+    if num_user_messages < len(questions):
+        # Devuelve la siguiente pregunta de la lista
+        return {
+            "responseText": questions[num_user_messages],
+            "generatedBio": None,
+            "isProfileComplete": False,
+        }
+    else:
+        # Después de la última pregunta, genera una biografía de ejemplo
+        return {
+            "responseText": "¡Perfecto! He creado una biografía de ejemplo para ti basada en tus respuestas. ¡Puedes editarla si quieres!",
+            "generatedBio": "Aventurero/a apasionado/a por el senderismo y la fotografía. Mis amigos dicen que soy leal y divertido/a. Busco una conexión genuina para compartir risas y explorar el mundo. Mi superpoder sería volar para viajar a cualquier lugar al instante.",
+            "isProfileComplete": True,
+        }
 
 @router.post("/generate-interests", response_model=List[str])
 async def generate_interests(req: schemas.GenerateInterestsRequest):
-    prompt = f"Basado en la siguiente biografía de un perfil de citas, extrae una lista de 5 a 7 intereses clave en español. Devuelve la respuesta únicamente como un array de strings en formato JSON. Biografía: '{req.bio_text}'"
-    try:
-        response = await model.generate_content_async(
-            prompt,
-            generation_config=genai.types.GenerationConfig(response_mime_type="application/json"),
-            safety_settings=SAFETY_SETTINGS
-        )
-        return parse_json_from_response(response.text)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error al generar intereses: {e}")
+    """Simula la generación de intereses a partir de una biografía."""
+    await asyncio.sleep(0.5)
+    return ["Viajes", "Fotografía", "Senderismo", "Cocina", "Música Indie", "Cine de Autor"]
 
-# Otros endpoints de IA usando la nueva sintaxis
 @router.post("/suggest-icebreaker", response_model=str)
 async def suggest_icebreaker(req: schemas.SuggestIcebreakerRequest):
-    prompt = f"Sugiere un rompehielos creativo y divertido para iniciar una conversación con {req.user_name}. Intereses de {req.user_name}: {', '.join(req.user_interests or [])}. Es el intento número {req.attempt_number}, sé original. Devuelve solo el texto del mensaje."
-    try:
-        response = await model.generate_content_async(prompt, safety_settings=SAFETY_SETTINGS)
-        return response.text.strip()
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error al sugerir rompehielos: {e}")
+    """Simula la sugerencia de un rompehielos."""
+    await asyncio.sleep(0.5)
+    interest = req.user_interests[0] if req.user_interests and req.user_interests[0] else "viajar"
+    return f"¡Hola {req.user_name}! He visto que te interesa '{interest}', ¡a mí también! ¿Cuál es tu mejor recuerdo relacionado con eso?"
 
 @router.post("/suggest-replies", response_model=List[str])
 async def suggest_replies(req: schemas.SuggestRepliesRequest):
-    prompt = f"Tu nombre es {req.own_name}. Estás en un chat con {req.chat_partner_name}. El último mensaje de {req.chat_partner_name} fue: '{req.last_message_text}'. Sugiere 3 respuestas cortas e ingeniosas para continuar la conversación. Devuelve un array de strings en formato JSON."
-    try:
-        response = await model.generate_content_async(
-            prompt,
-            generation_config=genai.types.GenerationConfig(response_mime_type="application/json"),
-            safety_settings=SAFETY_SETTINGS
-        )
-        return parse_json_from_response(response.text)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error al sugerir respuestas: {e}")
+    """Simula la sugerencia de respuestas de chat."""
+    await asyncio.sleep(0.5)
+    return [
+        "¡Jaja, qué bueno!",
+        "¿En serio? Cuéntame más sobre eso.",
+        "Y tú, ¿qué opinas al respecto?",
+    ]
 
 @router.post("/rewrite-message", response_model=str)
 async def rewrite_message(req: schemas.RewriteMessageRequest):
-    prompt = f"Reescribe el siguiente mensaje para que suene más {req.rewrite_goal} y atractivo: '{req.original_message}'. Devuelve solo el texto del mensaje reescrito."
-    try:
-        response = await model.generate_content_async(prompt, safety_settings=SAFETY_SETTINGS)
-        return response.text.strip()
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error al reescribir el mensaje: {e}")
+    """Simula la reescritura de un mensaje."""
+    await asyncio.sleep(0.5)
+    return f"{req.original_message} (versión simulada más amigable)"
