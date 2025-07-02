@@ -5,3 +5,4 @@ python-dotenv
 google-generativeai
 SQLAlchemy
 psycopg2-binary
+pyhumps
