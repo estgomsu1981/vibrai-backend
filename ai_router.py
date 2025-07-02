@@ -1,7 +1,9 @@
 import os
 import json
-from fastapi import APIRouter, Depends, HTTPException
-from google.generativeai import GoogleGenerativeAI
+import re
+from fastapi import APIRouter, HTTPException, Body
+from typing import List, Dict, Any
+import google.generativeai as genai
 from google.generativeai.types import HarmCategory, HarmBlockThreshold
 
 import schemas
@@ -12,6 +14,24 @@ router = APIRouter(
     tags=["IA"],
 )
 
+# --- INICIO DE LA CORRECCIÓN IMPORTANTE ---
+# El error 'ImportError: cannot import name 'GoogleGenerativeAI'' se debe a que la 
+# librería de Python ha cambiado. La forma correcta de inicializar es usando
+# genai.configure() y luego creando un modelo con genai.GenerativeModel().
+
+try:
+    # Configura la API key a nivel de módulo
+    genai.configure(api_key=os.environ["API_KEY"])
+except KeyError:
+    raise RuntimeError("La variable de entorno API_KEY no está configurada.")
+except Exception as e:
+    raise RuntimeError(f"Error al configurar el cliente de IA: {e}")
+
+# Crea una instancia del modelo generativo que usaremos en los endpoints
+model = genai.GenerativeModel(GEMINI_TEXT_MODEL)
+# --- FIN DE LA CORRECCIÓN IMPORTANTE ---
+
+
 # Configuración de seguridad para la IA
 SAFETY_SETTINGS = {
     HarmCategory.HARM_CATEGORY_HARASSMENT: HarmBlockThreshold.BLOCK_NONE,
@@ -20,22 +40,11 @@ SAFETY_SETTINGS = {
     HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT: HarmBlockThreshold.BLOCK_NONE,
 }
 
-try:
-    ai = GoogleGenerativeAI(api_key=os.environ["API_KEY"])
-except KeyError:
-    raise RuntimeError("La variable de entorno API_KEY no está configurada.")
-except Exception as e:
-    raise RuntimeError(f"Error al inicializar el cliente de IA: {e}")
-
 def parse_json_from_response(text: str) -> list | dict:
-    """Extrae un bloque de código JSON de una respuesta de texto."""
+    """Extrae un bloque de código JSON de una respuesta de texto de la IA."""
     text = text.strip()
-    match = re.search(r"```(json)?\n?(.*?)\n?```", text, re.S)
-    if match:
-        json_str = match.group(2).strip()
-    else:
-        json_str = text
-
+    match = re.search(r"```(json)?\s*(.*?)\s*```", text, re.DOTALL)
+    json_str = match.group(2) if match else text
     try:
         return json.loads(json_str)
     except json.JSONDecodeError as e:
@@ -43,101 +52,70 @@ def parse_json_from_response(text: str) -> list | dict:
         print(f"String problemático: {json_str}")
         raise ValueError("La respuesta de la IA no contenía un JSON válido.")
 
-@router.post("/profile-assistant")
+@router.post("/profile-assistant", response_model=schemas.ProfileAssistantResponse)
 async def profile_assistant(req: schemas.ProfileAssistantRequest):
-    system_instruction = (
-        "Eres Vibrai Assist, un coach de citas experto y amigable para una app llamada Vibrai. "
-        "Tu objetivo es ayudar al usuario a crear un perfil atractivo haciéndole 5 preguntas concisas, una por una. "
-        "Debes ser breve, casual y alentador. No reveles que eres un modelo de IA. "
-        "Cuando respondas a la quinta pregunta, finaliza la conversación con un mensaje de despedida y, "
-        "en el campo 'generatedBio' del JSON, escribe una biografía de 2-3 frases basada en TODAS las respuestas del usuario. "
-        "Las 5 preguntas son: "
-        "1. ¿Qué te encanta hacer en tu tiempo libre? "
-        "2. ¿Cuál es tu mayor pasión o algo que te ilumina los ojos al hablar de ello? "
-        "3. ¿Cómo te describirían tus amigos en tres palabras? "
-        "4. ¿Qué buscas en una conexión con alguien (amistad, algo serio, etc.)? "
-        "5. Si tuvieras un superpoder, ¿cuál sería y por qué? "
-        "Estructura tu respuesta SIEMPRE en formato JSON: {\"responseText\": \"tu respuesta conversacional\", \"generatedBio\": \"biografía final (o null)\", \"isProfileComplete\": boolean}"
-    )
+    system_instruction = "Eres Vibrai Assist, un coach de citas experto. Tu objetivo es ayudar al usuario a crear un perfil atractivo haciéndole 5 preguntas concisas, una por una. Al final, escribe una biografía de 2-3 frases basada en TODAS las respuestas. Responde SIEMPRE en formato JSON: {\"responseText\": \"tu respuesta conversacional\", \"generatedBio\": \"biografía final (o null)\", \"isProfileComplete\": boolean}"
     
-    contents = [{"role": "system", "parts": [{"text": system_instruction}]}]
-    contents.extend(req.chat_history)
+    # El historial ya viene en el formato correcto desde el frontend
+    contents = req.chat_history
     contents.append({"role": "user", "parts": [{"text": req.user_message}]})
+    
+    chat = model.start_chat(history=contents[:-1]) # Inicia el chat con el historial previo
+    chat.system_instruction = system_instruction
 
     try:
-        response = await ai.models.generateContent(
-            model=GEMINI_TEXT_MODEL,
-            contents=contents,
-            config={"responseMimeType": "application/json"},
-            safety_settings=SAFETY_SETTINGS,
+        response = await chat.send_message_async(
+            req.user_message,
+            safety_settings=SAFETY_SETTINGS
         )
-        return json.loads(response.text)
+        # La API de Gemini ahora puede devolver JSON directamente si se le indica
+        # en el prompt, pero por seguridad lo parseamos.
+        response_data = parse_json_from_response(response.text)
+        return response_data
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error al procesar la solicitud con IA: {e}")
-
+        raise HTTPException(status_code=500, detail=f"Error en el asistente de perfil: {e}")
 
 @router.post("/generate-interests", response_model=List[str])
 async def generate_interests(req: schemas.GenerateInterestsRequest):
-    prompt = (
-        "Basado en la siguiente biografía de un perfil de citas, extrae una lista de 5 a 7 intereses clave. "
-        "Devuelve la respuesta únicamente como un array de strings en formato JSON. Biografía: "
-        f"'{req.bio_text}'"
-    )
+    prompt = f"Basado en la siguiente biografía de un perfil de citas, extrae una lista de 5 a 7 intereses clave en español. Devuelve la respuesta únicamente como un array de strings en formato JSON. Biografía: '{req.bio_text}'"
     try:
-        response = await ai.models.generateContent(
-            model=GEMINI_TEXT_MODEL,
-            contents=prompt,
-            config={"responseMimeType": "application/json"},
-            safety_settings=SAFETY_SETTINGS,
+        response = await model.generate_content_async(
+            prompt,
+            generation_config=genai.types.GenerationConfig(response_mime_type="application/json"),
+            safety_settings=SAFETY_SETTINGS
         )
-        # El modelo debería devolver JSON directamente
-        return json.loads(response.text)
+        return parse_json_from_response(response.text)
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error al generar intereses con IA: {e}")
+        raise HTTPException(status_code=500, detail=f"Error al generar intereses: {e}")
 
-
+# Otros endpoints de IA usando la nueva sintaxis
 @router.post("/suggest-icebreaker", response_model=str)
 async def suggest_icebreaker(req: schemas.SuggestIcebreakerRequest):
-    prompt = (
-        f"Actúa como un experto en citas. Sugiere un rompehielos creativo y divertido para iniciar una conversación con {req.user_name}. "
-        f"Si están disponibles, basa la sugerencia en sus intereses: {', '.join(req.user_interests or [])}. "
-        f"Este es el intento número {req.attempt_number}, intenta que sea diferente a los anteriores. "
-        "Sé breve y directo. Devuelve solo el texto del mensaje, sin comillas ni saludos."
-    )
+    prompt = f"Sugiere un rompehielos creativo y divertido para iniciar una conversación con {req.user_name}. Intereses de {req.user_name}: {', '.join(req.user_interests or [])}. Es el intento número {req.attempt_number}, sé original. Devuelve solo el texto del mensaje."
     try:
-        response = await ai.models.generateContent(
-            model=GEMINI_TEXT_MODEL, contents=prompt, safety_settings=SAFETY_SETTINGS
-        )
+        response = await model.generate_content_async(prompt, safety_settings=SAFETY_SETTINGS)
         return response.text.strip()
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error al sugerir rompehielos: {e}")
 
 @router.post("/suggest-replies", response_model=List[str])
 async def suggest_replies(req: schemas.SuggestRepliesRequest):
-    prompt = (
-        f"Estás en un chat de citas. Tu nombre es {req.own_name} y hablas con {req.chat_partner_name}. "
-        f"El último mensaje que recibiste de {req.chat_partner_name} fue: '{req.last_message_text}'. "
-        "Sugiere 3 respuestas cortas, ingeniosas y que inviten a continuar la conversación. "
-        "Devuelve las sugerencias como un array de strings en formato JSON."
-    )
+    prompt = f"Tu nombre es {req.own_name}. Estás en un chat con {req.chat_partner_name}. El último mensaje de {req.chat_partner_name} fue: '{req.last_message_text}'. Sugiere 3 respuestas cortas e ingeniosas para continuar la conversación. Devuelve un array de strings en formato JSON."
     try:
-        response = await ai.models.generateContent(
-            model=GEMINI_TEXT_MODEL,
-            contents=prompt,
-            config={"responseMimeType": "application/json"},
-            safety_settings=SAFETY_SETTINGS,
+        response = await model.generate_content_async(
+            prompt,
+            generation_config=genai.types.GenerationConfig(response_mime_type="application/json"),
+            safety_settings=SAFETY_SETTINGS
         )
-        return json.loads(response.text)
+        return parse_json_from_response(response.text)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error al sugerir respuestas: {e}")
 
 @router.post("/rewrite-message", response_model=str)
 async def rewrite_message(req: schemas.RewriteMessageRequest):
-    prompt = f"Reescribe el siguiente mensaje para un chat de citas para que suene más amigable y atractivo. Mensaje original: '{req.original_message}'"
+    prompt = f"Reescribe el siguiente mensaje para que suene más {req.rewrite_goal} y atractivo: '{req.original_message}'. Devuelve solo el texto del mensaje reescrito."
     try:
-        response = await ai.models.generateContent(
-            model=GEMINI_TEXT_MODEL, contents=prompt, safety_settings=SAFETY_SETTINGS
-        )
+        response = await model.generate_content_async(prompt, safety_settings=SAFETY_SETTINGS)
         return response.text.strip()
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error al reescribir el mensaje: {e}")

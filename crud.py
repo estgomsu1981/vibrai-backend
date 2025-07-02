@@ -17,7 +17,6 @@ def get_discovery_profiles(db: Session, user_id: str) -> list[sql_models.User]:
     Obtiene perfiles para el feed de "Descubrir".
     Excluye al propio usuario y a aquellos con los que ya hay una conexión.
     """
-    # IDs de usuarios con los que ya hay una conexión (liked, matched, blocked)
     connected_user_ids = db.query(sql_models.Connection.user_liked_id).filter(
         sql_models.Connection.user_liking_id == user_id
     )
@@ -35,23 +34,15 @@ def get_connections_for_user(db: Session, user_id: str) -> list[sql_models.User]
     Obtiene las conexiones de un usuario (matches mutuos).
     """
     # IDs de usuarios con los que se ha hecho match
-    matched_user_ids_query = db.query(sql_models.Connection.user_liked_id).filter(
-        and_(
-            sql_models.Connection.user_liking_id == user_id,
-            sql_models.Connection.status == 'matched'
-        )
+    part1 = db.query(sql_models.Connection.user_liked_id).filter(
+        sql_models.Connection.user_liking_id == user_id,
+        sql_models.Connection.status == 'matched'
     )
-    
-    # También se necesita la otra dirección del match
-    user_has_liked_me_ids_query = db.query(sql_models.Connection.user_liking_id).filter(
-        and_(
-            sql_models.Connection.user_liked_id == user_id,
-            sql_models.Connection.status == 'matched'
-        )
+    part2 = db.query(sql_models.Connection.user_liking_id).filter(
+        sql_models.Connection.user_liked_id == user_id,
+        sql_models.Connection.status == 'matched'
     )
-
-    all_matched_ids = [row[0] for row in matched_user_ids_query.all()] + \
-                      [row[0] for row in user_has_liked_me_ids_query.all()]
+    all_matched_ids = [r.user_liked_id for r in part1] + [r.user_liking_id for r in part2]
     
     if not all_matched_ids:
         return []
@@ -66,35 +57,29 @@ def create_or_update_connection(db: Session, liker_id: str, liked_id: str) -> bo
     """
     Crea o actualiza una conexión. Devuelve True si se produce un match.
     """
-    # 1. Comprobar si el usuario que recibe el like ya había dado like antes.
-    existing_like_from_other_user = db.query(sql_models.Connection).filter(
-        and_(
-            sql_models.Connection.user_liking_id == liked_id,
-            sql_models.Connection.user_liked_id == liker_id
-        )
+    existing_like = db.query(sql_models.Connection).filter(
+        sql_models.Connection.user_liking_id == liked_id,
+        sql_models.Connection.user_liked_id == liker_id
     ).first()
 
-    if existing_like_from_other_user:
-        # ¡Es un match! Actualizamos la conexión existente a 'matched'.
-        existing_like_from_other_user.status = 'matched'
-        db.commit()
+    if existing_like:
+        existing_like.status = 'matched'
         
-        # Opcional: Crear también la conexión en la otra dirección para consistencia
-        reciprocal_connection = sql_models.Connection(
-            user_liking_id=liker_id,
-            user_liked_id=liked_id,
-            status='matched'
-        )
-        db.add(reciprocal_connection)
+        # Opcional: crea la conexión en la otra dirección para consistencia
+        # y para facilitar las consultas de 'mis conexiones'.
+        reciprocal_conn = db.query(sql_models.Connection).filter(
+             sql_models.Connection.user_liking_id == liker_id,
+             sql_models.Connection.user_liked_id == liked_id
+        ).first()
+        if not reciprocal_conn:
+            db.add(sql_models.Connection(user_liking_id=liker_id, user_liked_id=liked_id, status='matched'))
+        else:
+            reciprocal_conn.status = 'matched'
+            
         db.commit()
         return True
     else:
-        # No hay match todavía. Creamos una nueva conexión con estado 'liked'.
-        new_connection = sql_models.Connection(
-            user_liking_id=liker_id,
-            user_liked_id=liked_id,
-            status='liked'
-        )
+        new_connection = sql_models.Connection(user_liking_id=liker_id, user_liked_id=liked_id, status='liked')
         db.add(new_connection)
         db.commit()
         return False

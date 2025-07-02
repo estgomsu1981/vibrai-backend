@@ -3,29 +3,29 @@ from sqlalchemy import (
     Column, String, Integer, Text, Boolean, DECIMAL,
     TIMESTAMP, Enum, ForeignKey, PrimaryKeyConstraint
 )
-from sqlalchemy.dialects.postgresql import ARRAY
+from sqlalchemy.dialects.postgresql import ARRAY, UUID
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from database import Base
 
 # Definición de los tipos ENUM de PostgreSQL
-class AchievementCategoryEnum(enum.Enum):
+class AchievementCategory(str, enum.Enum):
     académico = 'académico'
     vida = 'vida'
     deportivo = 'deportivo'
 
-class MarketplaceListingTypeEnum(enum.Enum):
+class MarketplaceListingType(str, enum.Enum):
     buscoTrabajo = 'buscoTrabajo'
     vendoAlgo = 'vendoAlgo'
     ofrezcoTrabajo = 'ofrezcoTrabajo'
     otro = 'otro'
 
-class UserResponsivenessEnum(enum.Enum):
+class UserResponsiveness(str, enum.Enum):
     high = 'high'
     medium = 'medium'
     low = 'low'
 
-class ConnectionStatusEnum(enum.Enum):
+class ConnectionStatus(str, enum.Enum):
     liked = 'liked'
     matched = 'matched'
     passed = 'passed'
@@ -48,7 +48,7 @@ class User(Base):
     longitude = Column(DECIMAL(9, 6))
     gender_identities = Column(ARRAY(String))
     seeking_gender_identities = Column(ARRAY(String))
-    responsiveness_level = Column(Enum(UserResponsivenessEnum), default='medium')
+    responsiveness_level = Column(Enum(UserResponsiveness), default='medium')
     gift_balance = Column(Integer, default=0)
     interaction_score = Column(Integer, default=0)
     is_premium = Column(Boolean, default=False, index=True)
@@ -63,7 +63,7 @@ class Achievement(Base):
     __tablename__ = "achievements"
     id = Column(String, primary_key=True)
     user_id = Column(String, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
-    category = Column(Enum(AchievementCategoryEnum), nullable=False)
+    category = Column(Enum(AchievementCategory), nullable=False)
     description = Column(Text, nullable=False)
     photo = Column(String)
     date_added = Column(TIMESTAMP(timezone=True), server_default=func.now())
@@ -76,7 +76,7 @@ class MarketplaceListing(Base):
     __tablename__ = "marketplace_listings"
     id = Column(String, primary_key=True)
     user_id = Column(String, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
-    type = Column(Enum(MarketplaceListingTypeEnum), nullable=False)
+    type = Column(Enum(MarketplaceListingType), nullable=False)
     title = Column(Text, nullable=False)
     description = Column(Text, nullable=False)
     photo = Column(String)
@@ -92,7 +92,22 @@ class Connection(Base):
     __tablename__ = 'connections'
     user_liking_id = Column(String, ForeignKey('users.id', ondelete="CASCADE"), nullable=False)
     user_liked_id = Column(String, ForeignKey('users.id', ondelete="CASCADE"), nullable=False, index=True)
-    status = Column(Enum(ConnectionStatusEnum), nullable=False, default='liked')
+    status = Column(Enum(ConnectionStatus), nullable=False, default='liked')
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
 
     __table_args__ = (PrimaryKeyConstraint('user_liking_id', 'user_liked_id'),)
+
+class Chat(Base):
+    __tablename__ = 'chats'
+    id = Column(UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid())
+    participant_ids = Column(ARRAY(String), nullable=False)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
+
+class Message(Base):
+    __tablename__ = 'messages'
+    id = Column(UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid())
+    chat_id = Column(UUID(as_uuid=True), ForeignKey('chats.id', ondelete="CASCADE"), nullable=False)
+    sender_id = Column(String, ForeignKey('users.id', ondelete="CASCADE"), nullable=False)
+    text = Column(Text)
+    gift_id = Column(String)
+    timestamp = Column(TIMESTAMP(timezone=True), server_default=func.now())

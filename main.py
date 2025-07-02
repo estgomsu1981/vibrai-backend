@@ -13,63 +13,60 @@ from ai_router import router as ai_router
 app = FastAPI(
     title="Vibrai Backend",
     description="API para la aplicación de citas Vibrai con integración de IA y base de datos.",
-    version="1.8.0"
+    version="2.0.0"
 )
 
 # --- Evento de Arranque ---
 @app.on_event("startup")
 def on_startup():
     print("Iniciando aplicación...")
-    
-    # Intenta crear las tablas. Si ya existen, no hace nada.
-    # En un entorno de producción, se usarían migraciones (ej. Alembic).
     try:
         sql_models.Base.metadata.create_all(bind=engine)
         print("Tablas verificadas/creadas con éxito.")
     except Exception as e:
-        print(f"Error al crear las tablas: {e}")
-        # Considera detener la aplicación si la BD es crucial
-        # raise e
+        print(f"Error crítico al crear las tablas: {e}")
+        raise e
 
-    # Poblar la base de datos si está vacía
     db = SessionLocal()
     try:
-        user_count = db.query(sql_models.User).count()
-        if user_count == 0:
+        if db.query(sql_models.User).count() == 0:
             print("Base de datos vacía. Poblando con datos de ejemplo...")
-            # Datos de ejemplo mejorados con los nuevos campos
             users_data = [
-                 {
+                {
                     "id": "currentUser", "name": "Alex", "age": 28, "bio": "Explorando cafés y senderos.",
-                    "photos": ["https://picsum.photos/seed/alex1/400/600"], "primary_photo_url": "https://picsum.photos/seed/alex1/400/600",
-                    "interests": ["Café", "Senderismo", "Hornear"], "occupation": "Ingeniero/a de Software", "country": "España",
-                    "latitude": 40.416775, "longitude": -3.703790, "is_premium": False,
-                    "gender_identities": ["No Binario"], "seeking_gender_identities": ["Todos"]
+                    "photos": ["https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?q=80&w=1887&auto=format&fit=crop"], 
+                    "primary_photo_url": "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?q=80&w=1887&auto=format&fit=crop",
+                    "interests": ["Café", "Senderismo", "Hornear", "Viajar", "Música Indie"], 
+                    "occupation": "Ingeniero de Software", "country": "España",
+                    "latitude": 40.416775, "longitude": -3.703790, "is_premium": True,
+                    "gender_identities": ["No Binario"], "seeking_gender_identities": ["Todos"],
+                    "responsiveness_level": "high",
                 },
                 {
-                    "id": "match1", "name": "Jaime", "age": 30, "bio": "Amante del arte y la música.",
-                    "photos": ["https://picsum.photos/seed/jaime1/400/600"], "primary_photo_url": "https://picsum.photos/seed/jaime1/400/600",
-                    "interests": ["Arte", "Música", "Cocina"], "occupation": "Diseñador/a Gráfico/a", "country": "España",
-                    "latitude": 41.385063, "longitude": 2.173404, "is_premium": True,
-                    "gender_identities": ["Masculino"], "seeking_gender_identities": ["Femenino", "No Binario"]
-                },
-                {
-                    "id": "match2", "name": "Alexia", "age": 26, "bio": "Fan del cine y los juegos de mesa.",
-                    "photos": ["https://picsum.photos/seed/alexia1/400/600"], "primary_photo_url": "https://picsum.photos/seed/alexia1/400/600",
-                    "interests": ["Películas", "Juegos de Mesa", "Perros"], "occupation": "Especialista en Marketing", "country": "México",
+                    "id": "match1", "name": "Sofía", "age": 26, "bio": "Amante del arte, la música y los atardeceres en la playa.",
+                    "photos": ["https://images.unsplash.com/photo-1494790108377-be9c29b29330?q=80&w=1887&auto=format&fit=crop"], 
+                    "primary_photo_url": "https://images.unsplash.com/photo-1494790108377-be9c29b29330?q=80&w=1887&auto=format&fit=crop",
+                    "interests": ["Arte", "Música", "Playa", "Yoga", "Cocina Vegana"], 
+                    "occupation": "Diseñadora Gráfica", "country": "México",
                     "latitude": 19.432608, "longitude": -99.133209, "is_premium": False,
-                    "gender_identities": ["Femenino"], "seeking_gender_identities": ["Masculino"]
+                    "gender_identities": ["Femenino"], "seeking_gender_identities": ["Masculino", "No Binario"],
+                    "responsiveness_level": "medium",
                 },
+                {
+                    "id": "match2", "name": "Carlos", "age": 32, "bio": "Entusiasta de la tecnología, el deporte y las buenas conversaciones.",
+                    "photos": ["https://images.unsplash.com/photo-1539571696357-5a69c17a67c6?q=80&w=1887&auto=format&fit=crop"], 
+                    "primary_photo_url": "https://images.unsplash.com/photo-1539571696357-5a69c17a67c6?q=80&w=1887&auto=format&fit=crop",
+                    "interests": ["Deporte", "Tecnología", "F1", "Cine de Ciencia Ficción"], 
+                    "occupation": "Atleta", "country": "Colombia",
+                    "latitude": 4.710989, "longitude": -74.072092, "is_premium": True,
+                    "gender_identities": ["Masculino"], "seeking_gender_identities": ["Femenino"],
+                    "responsiveness_level": "high",
+                }
             ]
             for user_data in users_data:
-                user = sql_models.User(**user_data)
-                db.add(user)
-            
+                db.add(sql_models.User(**user_data))
             db.commit()
-            print(f"Base de datos poblada con {len(users_data)} usuarios de prueba.")
-        else:
-            print(f"La base de datos ya contiene {user_count} usuarios.")
-            
+            print(f"Base de datos poblada con {len(users_data)} usuarios.")
     finally:
         db.close()
     print("Preparación de la aplicación completa.")
@@ -78,7 +75,7 @@ def on_startup():
 # --- Middlewares ---
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"], # En producción, deberías restringir esto
+    allow_origins=["*"], # En producción, deberías restringir esto a tu dominio del frontend
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -95,7 +92,7 @@ def get_db():
 # --- Rutas de API Principales ---
 @app.get("/", tags=["Root"])
 def read_root():
-    return {"message": "Bienvenido al backend de Vibrai"}
+    return {"message": "Bienvenido al backend de Vibrai v2.0.0"}
 
 @app.get("/api/profile", response_model=schemas.User, tags=["Perfiles"])
 def get_user_profile(db: Session = Depends(get_db)):

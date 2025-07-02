@@ -3,13 +3,15 @@ from typing import List, Optional, Any
 from datetime import datetime
 import humps
 from sql_models import (
-    AchievementCategoryEnum, MarketplaceListingTypeEnum, 
-    UserResponsivenessEnum
+    AchievementCategory, MarketplaceListingType, 
+    UserResponsiveness
 )
 
+# Esta función convierte snake_case (Python) a camelCase (JSON/JS)
 def to_camel(string: str) -> str:
     return humps.camelize(string)
 
+# Modelo base para que todos los esquemas usen la conversión a camelCase
 class OrmModel(BaseModel):
     class Config:
         from_attributes = True
@@ -19,18 +21,17 @@ class OrmModel(BaseModel):
 # --- Schemas de Entidades ---
 class Achievement(OrmModel):
     id: str
-    user_id: str
-    category: AchievementCategoryEnum
+    category: AchievementCategory
     description: str
     photo: Optional[str] = None
     date_added: datetime
-    is_boosted: Optional[bool] = False
+    is_boosted: bool = False
     boost_expiry_date: Optional[datetime] = None
 
 class MarketplaceListing(OrmModel):
     id: str
     user_id: str
-    type: MarketplaceListingTypeEnum
+    type: MarketplaceListingType
     title: str
     description: str
     photo: Optional[str] = None
@@ -55,7 +56,7 @@ class User(OrmModel):
     longitude: Optional[float] = None
     gender_identities: List[str] = []
     seeking_gender_identities: List[str] = []
-    responsiveness_level: Optional[UserResponsivenessEnum] = None
+    responsiveness_level: Optional[UserResponsiveness] = None
     is_premium: bool
     achievements: List[Achievement] = []
     marketplace_listings: List[MarketplaceListing] = []
@@ -69,21 +70,21 @@ class LikeResponse(OrmModel):
 # --- Schemas para el Router de IA ---
 class ProfileAssistantRequest(BaseModel):
     user_message: str
-    chat_history: List[Any] # La estructura de Content es compleja, la tratamos como Any
+    chat_history: List[Any]
 
 class GenerateInterestsRequest(BaseModel):
-    bio_text: str
+    bio_text: str = Field(..., alias='bioText')
 
 class SuggestIcebreakerRequest(BaseModel):
-    user_name: str
-    user_interests: Optional[List[str]] = None
-    attempt_number: int
+    user_name: str = Field(..., alias='userName')
+    user_interests: Optional[List[str]] = Field(None, alias='userInterests')
+    attempt_number: int = Field(..., alias='attemptNumber')
 
 class SuggestRepliesRequest(BaseModel):
-    last_message_text: str
-    own_name: str
-    chat_partner_name: str
+    last_message_text: str = Field(..., alias='lastMessageText')
+    own_name: str = Field(..., alias='ownName')
+    chat_partner_name: str = Field(..., alias='chatPartnerName')
     
 class RewriteMessageRequest(BaseModel):
-    original_message: str
-    rewrite_goal: str
+    original_message: str = Field(..., alias='originalMessage')
+    rewrite_goal: str = Field(..., alias='rewriteGoal')
