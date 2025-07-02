@@ -6,20 +6,20 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-# Render/Neon proporciona la URL de la DB en esta variable de entorno
-SQLALCHEMY_DATABASE_URL = os.getenv("DATABASE_URL")
+DATABASE_URL = os.getenv("DATABASE_URL")
 
-if not SQLALCHEMY_DATABASE_URL:
-    raise ValueError("No DATABASE_URL set for SQLAlchemy")
+if not DATABASE_URL:
+    raise ValueError("No se encontró la variable de entorno DATABASE_URL. Asegúrate de que está definida.")
 
-engine = create_engine(SQLALCHEMY_DATABASE_URL)
+# La clave para la estabilidad en Render:
+# pool_pre_ping=True verifica que la conexión esté viva antes de usarla.
+engine = create_engine(
+    DATABASE_URL, 
+    pool_pre_ping=True,
+    # Opcional: para logs de SQL, descomenta la siguiente línea
+    # echo=True 
+)
+
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-Base = declarative_base()
 
-# Función de dependencia para inyectar la sesión de la base de datos en los endpoints
-def get_db():
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
+Base = declarative_base()
